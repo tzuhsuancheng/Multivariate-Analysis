@@ -1,0 +1,207 @@
+---
+title: "Assignment1"
+author: "Tzu-Hsuan Cheng (r07741023)"
+date: "2019年3月1日"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 4
+    number_sections: true
+    toc_float: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, results = "hide")
+#import library
+library(rethinking)
+library(tidyverse)
+library(tidybayes)
+library(gridExtra)
+```
+
+```{r eval=FALSE}
+#import library
+library(rethinking)
+library(tidyverse)
+library(tidybayes)
+library(gridExtra)
+```
+
+The data indicate the gender (male=1, female=0) of officially reported first and second born children in 100 two-child families.
+```{r}
+#import data
+data(homeworkch3)
+birth1
+birth2
+```
+
+
+So for example, the first family in the data reported a boy (1) and then a girl (0). The second family reported a girl (0) and then a boy (1). The third family reported two girls.
+Use these vectors as data. So for example to compute the total number of boys born across all of these
+births, you could use: sum(birth1) + sum(birth2)
+
+# Question1:
+Using grid approximation, compute the posterior distribution for the probability of a birth being a boy.
+Assume a uniform prior probability. Which parameter value maximizes the posterior probability?
+
+```{r}
+#information
+n_boys <- sum(birth1, birth2) #total boys=111
+n <- length(birth1)+length(birth2) #total observations=200
+
+# define the grid approximation dataframe function
+grid_df <- function(x,n){
+  tibble(p_grid = seq(from = 0, to = 1, length.out = 1000), prior=1) %>% 
+    mutate(likelihood      = dbinom(x, size=n, prob = p_grid)) %>% 
+    mutate(unstd_posterior = likelihood * prior) %>%                 
+    mutate(posterior       = unstd_posterior / sum(unstd_posterior))
+}
+```
+
+```{r}
+# create a dataframe for grid approximation
+d <- grid_df(x=n_boys, n=n) 
+
+#plot
+d %>%  
+  ggplot(aes(x = p_grid, y = posterior)) +
+  geom_line() + # add line to connect the dots
+  labs(x = "probability of boy birth",
+       y = "posterior probability") +
+  theme(panel.grid = element_blank())
+```
+
+the maximum of posterior
+```{r}
+# the maximum of posterior
+maximum <-d$p_grid[which.max(d$posterior)]
+print(maximum)
+```
+
+使用Grix approximation做估計，最大的後驗機率出現在男嬰機率p = 0.5545546的時候
+
+# Question2:
+Using the sample() function, draw 10,000 random parameter values from the posterior distribution you
+calculated above. Use these samples to estimate the 50%, 89%, and 97% highest posterior density intervals.(hint: use mode_hdi() in tidybayes packages)
+
+Sampling steps:
+
+- draw from `d$p_grid`
+
+- follow the 'd$prosterior' probability distribution
+
+- draw 10,000 times
+
+- replace = True (取後放回)
+
+```{r}
+#generate samples into tibble
+set.seed(331)
+samples <- sample(d$p_grid, # randomly select from p_grid
+                  prob = d$posterior, # probility of each p_grid
+                  size = 1e4, # draw 10,000 samples
+                  replace = T) # sample with replacement 
+```
+
+Find 50%/89%/97% highest posterior density interval `hpdi`
+```{r}
+find_hpdi <- tibble() #create a empty dataframe
+for (i in c(0.5,0.89,0.97)){
+  df<-
+    mode_hdi(samples, .width = i) %>%
+    summarise(min=ymin, max=ymax, hpdi=paste(i, "Percentile Interval"))
+  
+  find_hpdi<-rbind(find_hpdi, df) #append the rows
+  }
+
+print(find_hpdi)
+```
+
+Plot 
+```{r}
+for (i in 1:3){
+p = d %>% 
+  ggplot(aes(x = p_grid)) +
+  geom_ribbon(data = d %>% filter(p_grid > find_hpdi$min[i] & 
+                                    p_grid < find_hpdi$max[i]),
+              aes(ymin = 0, ymax = posterior),
+              fill = "grey75") +
+  geom_line(aes(y = posterior)) +
+  labs(subtitle = find_hpdi$hpdi[i],
+       x = "proportion of birth of boys (p)",
+       y = "density")
+print(p)
+}
+```
+
+# Question3:
+Use rbinom function to simulate 10,000 replicates of 200 births. You should end up with 10,000 numbers,
+each one a count of boys out of 200 births. Compare the distribution of predicted numbers of boys to the
+actual count in the data (111 boys out of 200 births). There are many good ways to visualize the simulations, but the dens command (part of the rethinking package) is probably the easiest way in this case. Does it look like the model fits the data well? That is, does the distribution of predictions include the actual observation as a central, likely outcome?
+
+Simulation
+`ribinom(n, size, prob)` 在size次的試驗當中，根據成功的機率(prob)，產生n個隨機值(random deviates)
+```{r}
+simulation <- rbinom(1e4, size = n,  prob = samples)
+dens(simulation)
+abline(v=n_boys)
+```
+
+As you can see, the distribution of predictions include the actual observation as a central.
+
+
+# Question4:
+Now compare 10,000 counts of boys from 100 simulated first borns only to the number of boys in the first
+births, birth1. How does the model look in this light?
+
+Update new info
+```{r}
+#update new info
+n_boys<- sum(birth1) #n_boys=51
+n <- length(birth1) #n=100
+
+# create a new dataframe for grid approximation
+d_birth1 <- grid_df(x=n_boys, n=n)
+
+# new samples
+samples_birth1 <- sample(d_birth1$p_grid, prob = d_birth1$posterior, size = 1e4, replace = T)
+```
+
+Simulation according to 100 samples from birth1:
+```{r}
+simulation2 <- rbinom(1e4, size=n, prob=samples_birth1)
+dens(simulation2)
+abline(v=n_boys) 
+```
+if we use the updated probability of new samples(samples_birth1):
+the distribution of predictions seems to include the actual observation as a central outcome here, too.
+
+Simulation according to 200 samples from birth1 and birth2
+```{r}
+simulation3 <- rbinom(1e4, size=n, prob=samples)
+dens(simulation3)
+abline(v=n_boys) 
+```
+However, if we use the initial posterior density of the whole sample: the actual number of boys appears to be below this estimation.
+
+
+# Question5:
+The model assumes that sex of first and second births are independent. To check this assumption, focus now on second births that followed female first borns. Compare 10,000 simulated counts of boys to only those second births that followed girls. To do this correctly, you need to count the number of first borns who were girls and simulate that many births, 10,000 times. Compare the counts of boys in your simulations to the actual observed count of boys following girls. How does the model look in this light? Any guesses what is going on in these data?
+
+```{r}
+#dataframe that girls born first
+d_gb <-
+  tibble(birth1 = birth1,
+         birth2 = birth2) %>%
+  filter(birth1 == 0)
+```
+
+```{r}
+simulation4 <- rbinom(1e4, size=nrow(d_gb), prob=samples)
+dens(simulation4, adj=0.9)
+abline(v=sum(d_gb$birth2))
+```
+
+As you can see, the actual number of second births that followed female first borns is much more higher, which means the result has violated the assumption of question.
+實際的資料顯示：第一胎生女生，第二胎生男生的機率遠大於用總和的機率simulate的結果，與"sex of first and second births are independent." 的假設不符合。
