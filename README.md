@@ -6,13 +6,12 @@
 ## Assignment1:
 - Ch3 Sampling the imaginary
 - Keywords: grid approximation
-- [Code]()
+- [Code](https://github.com/tzuhsuancheng/Multivariate-Analysis/blob/master/assignment1/assignment1.Rmd)
 
 ## Assignment2:
-- exercise: ch4_linear_models
-- tutorial: ch4
-- key points: plot HPDI, PI, prediction
-- r functions: sapply(), gather(), goupby(), ungroup()
+- Ch4_linear_models
+- Keywords: plot HPDI, PI, prediction
+- [Code]()
 
 ## Assignment3:
 - exercise: ch5_multivariate_linear_models
