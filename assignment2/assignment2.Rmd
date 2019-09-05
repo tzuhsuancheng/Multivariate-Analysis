@@ -1,0 +1,406 @@
+---
+title: "Assignment2"
+author: "Cheng"
+date: "3/16/2019"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 4
+    number_sections: true
+    toc_float: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, results = "hide")
+#import library
+library(rethinking)
+library(tidyverse)
+library(tidybayes)
+library(rstan)
+library(ggplot2)
+library(ggthemes)
+```
+
+
+```{r eval=FALSE}
+#import library
+library(rethinking)
+library(tidyverse)
+library(tidybayes)
+library(rstan)
+library(ggplot2)
+library(ggthemes)
+```
+
+
+# Question1
+By using the Howell1 data mentioned in the class, the weights listed below were recorded
+in the !Kung census, but heights were not recorded for these individuals. Provide predicted heights and 89% intervals (either HPDI or PI) for each of these individuals. That is, fill in the table below, using model-based predictions. (Hint:library(rethinking);data(Howell1))
+
+```{r message=FALSE} 
+#import the data
+data(Howell1)
+d <- Howell1
+```
+
+Before modeling, let's take a look of `height` data
+```{r}
+d %>% 
+  ggplot() +
+  geom_histogram(aes(height))
+```
+
+```{r}
+# create Rstan model
+m01 <- "
+  data {
+    int<lower=1> N;
+    int<lower=1> N2;
+    vector[N] height;
+    vector[N] weight;
+    vector[N2] weight_test;
+  }
+  parameters {
+    real alpha;
+    real beta;
+    real<lower=0,upper=50> sigma;
+  }
+  model {
+    vector[N] mu = alpha + beta * weight;
+
+    // prior
+    alpha ~ normal(178, 20); 
+    beta ~ lognormal(0,1);
+    
+    //likelihood
+    height ~ normal(mu, sigma);
+  }
+  generated quantities{
+    real pred_y[N2];
+    vector[N2] mu = alpha + beta * weight_test;
+
+    pred_y = normal_rng(mu, sigma);
+  }
+
+"
+
+weight_test = c(46.95, 43.72, 64.78, 32.59, 54.63)
+
+dat <- list(N = NROW(d),
+            height = d$height,
+            weight = d$weight,
+            N2 = length(weight_test),
+            weight_test = weight_test)
+
+fit01 <- stan(model_code = m01, data = dat, cores = 2, chains = 2, iter = 1000)
+fit01.post = as.data.frame(fit01)
+```
+
+Prediction Interval
+```{r}
+# table
+pred_y = fit01.post %>% 
+  select(contains("pred_y"))
+
+answer.sheet = data.frame(
+  individual = seq(1:5),
+  weight = weight_test,
+  `expected height` = pred_y %>% apply(., 2, mean), # by column
+  L_HPDI = pred_y %>% apply(.,2,HPDI) %>% .[1,],
+  H_HPDI = pred_y %>% apply(.,2,HPDI) %>% .[2,])
+
+answer.sheet
+```
+
+# Question 2
+Select out all the rows in the Howell1 data with ages below 18 years of age. If you do it right, you should end up with a new data frame with 192 rows in it.
+
+```{r}
+d2 <- Howell1[Howell1$age < 18, ]
+nrow(d2)
+```
+
+After filtering, the distribution of `height` seems to follow a normal distribution
+```{r}
+d2 %>% 
+  ggplot() +
+  geom_histogram(aes(height))
+```
+
+## (a) 
+Fit a linear regression to these data, using stan model. Present and interpret the estimates. For every 10 units of increase in weight, how much taller does the model predict a child gets?
+```{r}
+m02 <- "
+data {
+int<lower=1> N;
+vector[N] height;
+vector[N] weight;
+}
+parameters {
+real alpha;
+real beta;
+real<lower=0,upper=60> sigma;
+}
+model {
+vector[N] mu = alpha + beta * weight;
+
+height ~ normal(mu, sigma);
+alpha ~ normal(178, 20); 
+beta ~ lognormal(0,1);
+
+}
+"
+
+# reorganize d data
+dat <- list(N = NROW(d2),
+            height = d2$height,
+            weight = d2$weight)
+#sampling
+fit02 <- stan(model_code = m02, data = dat, cores = 2, chains = 2, iter = 1000)
+
+# summarize
+print(fit02)
+
+```
+ 
+According to the table, the estimate of a indicates that around 58.85 is a plausible height for whom is below 18 years old with a weight of 0 kg. The estimate of b indicates that when increase one unit of wieght, the height would increase 2.69 unit. The estimate of σ indicates that, for participants below 18 years old, the standard deviation of heights is around 8.55 cm.
+
+## (b)
+Plot the raw data, with height on the vertical axis and weight on the horizontal axis. Superimpose
+the stan predicted regression line and 89% HPDI for the mean. Also superimpose the 89% HPDI for
+predicted heights.
+
+Add generated quantities for predcition and backtesting
+```{r}
+m02.1 <- "
+  data {
+    int<lower=1> N;
+    vector[N] height;
+    vector[N] weight;
+  }
+  parameters {
+    real alpha;
+    real beta;
+    real<lower=0,upper=60> sigma;
+  }
+  model {
+    vector[N] mu = alpha + beta * weight;
+    
+    height ~ normal(mu, sigma);
+    alpha ~ normal(178, 20); 
+    beta ~ lognormal(0, 1);
+  }
+  generated quantities {
+    real y_pred[N];
+    vector[N] mu;
+
+    mu = alpha + beta * weight;
+    y_pred = normal_rng(mu, sigma);
+  }
+"
+
+# reorganize d data
+dat <- list(N = NROW(d2),
+            height = d2$height,
+            weight = d2$weight)
+#sampling
+fit02.1 <- stan(model_code = m02.1, data = dat, cores = 2, chains = 2, iter = 1000)
+post.fit02.1 = as.data.frame(fit02.1)
+```
+
+Plot 89% CI
+The interval for **mean** prediction on each weight.
+```{r}
+pred_mu = post.fit02.1 %>% 
+  select(contains("mu"))
+
+CI = data.frame(
+  mean = pred_mu %>% apply(., 2, mean),
+  L_HPDI = pred_mu %>% apply(.,2,HPDI) %>% .[1,],
+  H_HPDI = pred_mu %>% apply(.,2,HPDI) %>% .[2,],
+  weight = d2$weight)
+
+CI %>% 
+  ggplot() +
+  geom_point(data = d2, aes(weight, height), color="blue", alpha=.3) +
+  geom_line(aes(weight, mean)) +
+  geom_ribbon(aes(x=weight,ymin=L_HPDI, ymax=H_HPDI), alpha=.3) +
+  ggtitle("89% Confidence Interval")
+
+```
+
+Plot 89% Pridiction interval
+The interval for **one** prediction on each weight.
+```{r}
+pred_y = post.fit02.1 %>% 
+  select(contains("y_pred"))
+
+PI = data.frame(
+  mean = pred_y %>% apply(., 2, mean),
+  L_HPDI = pred_y %>% apply(.,2,HPDI) %>% .[1,],
+  H_HPDI = pred_y %>% apply(.,2,HPDI) %>% .[2,],
+  weight = d2$weight)
+  
+PI %>% 
+  ggplot() +
+  geom_point(data = d2, aes(weight, height), color="blue", alpha=.3) +
+  geom_line(aes(weight, mean)) +
+  geom_ribbon(aes(x=weight,ymin=L_HPDI, ymax=H_HPDI), alpha=.3) +
+  ggtitle("89% Prediction Interval")
+```
+
+Plot CI & PI together
+```{r}
+ggplot()+
+  geom_point(data = d2, aes(weight, height), color="blue", alpha=.3) +
+  geom_line(data=CI, aes(weight, mean)) +
+  geom_ribbon(data=CI, aes(x=weight, ymin=L_HPDI, ymax=H_HPDI), alpha=.5) +
+  geom_ribbon(data=PI, aes(x=weight,ymin=L_HPDI, ymax=H_HPDI), alpha=.2)
+```
+
+## (c)
+What aspects of the model fit concern you? Describe the kinds of assumption you would change, if
+any, to improve your model. You don’t have to write any new code. Just explain what the model
+appears to be doing a bad job of, and what you hypothesize would be a better model?
+
+The linear model seems not perform well.The assumption that the relationship between μ and weight is linear may be wrong. I think I'll try polynomial regression next.
+
+# Question 3
+Suppose a colleague of yours, who works on allometry, glances at the practice problems
+just above. (In Question 2). You colleague exclaims, “That’s silly. Everyone knows that it’s only the
+logarithm of body weight that scales with height!” Let’s take your colleague’s advice and see what happens.
+
+$h_{i}$ ~ Normal($μ_{i}$, $\sigma$)
+$μ_{i}$ = $\alpha$ + $\beta$ log($w_{i}$)
+$\alpha$ ~ Normal(178, 100)
+$\beta$ ~ Normal(0, 100)
+$\sigma$ ~ Uniform(0, 50)
+
+## (a) 
+Model the relationship between height (cm) and the natural logarithm of weight (log-kg). Use the entire Howell1 data frame, all 544 rows, adults and non-adults.Fit this model, using MCMC (stan):
+```{r}
+d <- Howell1
+d$weight_log = log(d$weight)
+```
+
+```{r}
+m03 <- "
+  data {
+    int<lower=1> N;
+    vector[N] height;
+    vector[N] weight_log;
+  }
+  parameters {
+    real alpha;
+    real beta;
+    real<lower=0,upper=50> sigma;
+  }
+  model {
+    vector[N] mu = alpha + beta * weight_log;
+    
+    height ~ normal(mu, sigma);
+    alpha ~ normal(178,100); 
+    beta ~ normal(0,100);
+  }
+  generated quantities {
+    real y_pred[N];
+    vector[N] mu;
+    
+    mu = alpha + beta * weight_log;
+    y_pred = normal_rng(mu, sigma);
+  }
+"
+
+# reorganize d data
+dat <- list(N = NROW(d),
+            height = d$height,
+            weight_log = d$weight_log)
+#sampling
+fit03 <- stan(model_code = m03, data = dat, cores = 2, chains = 2, iter = 1000)
+post.fit03 = as.data.frame(fit03)
+
+# summarize
+summary(fit03, pars=c("alpha","beta", "sigma"))[[1]] %>% 
+  as.data.frame() %>% 
+  select(mean, sd)
+```
+
+The estimate of a shows that the predicted height of an individual with a weight equal to 0 log-kg is -23.89 cm. The estimate of b indicates that if weight increase for 1 log-kg then predicted height would increace 47.11 cm. The estimate of σ indicates that, in the model, the standard deviation of height predictions is 5.17 cm.
+
+## (b)
+Begin with this plot:
+`plot(height~weight, data=Howell1, col=col.alpha(rangi2, 0.4))`
+Then use samples from the approximate posterior of the model in (a) to superimpose on the plot: (1) the
+predicted mean height as a function of weight, (2) the 97% HPDI for the mean, and (3) the 97% HPDI for
+predicted heights.
+
+Plot raw data
+```{r}
+plot(height~weight, data=Howell1, col=col.alpha(rangi2, 0.4))
+```
+
+(1) Plot the predicted mean height as a function of weight
+```{r}
+pred_y = post.fit03 %>% 
+  select(contains("y_pred"))
+
+pred_y = data.frame(
+  mean = pred_y %>% apply(., 2, mean),
+  weight = d$weight)
+
+pred_y %>% 
+  ggplot() +
+  geom_point(data = d, aes(weight, height), color="blue", alpha=.3) +
+  geom_line(aes(weight, mean)) 
+
+```
+
+(2) Plot the 97% HPDI for the mean
+```{r}
+pred_mu = post.fit03 %>% 
+  select(contains("mu"))
+
+CI = data.frame(
+  mean = pred_mu %>% apply(., 2, mean),
+  L_HPDI = pred_mu %>% apply(., 2, HPDI, prob = 0.97) %>% .[1,],
+  H_HPDI = pred_mu %>% apply(., 2, HPDI, prob = 0.97) %>% .[2,],
+  weight = d$weight)
+
+CI %>% 
+  ggplot() +
+  geom_point(data = d, aes(weight, height), color="blue", alpha=.3) +
+  geom_line(aes(weight, mean)) +
+  geom_ribbon(aes(x=weight,ymin=L_HPDI, ymax=H_HPDI), alpha=.3) +
+  ggtitle("97% Confidence Interval")
+```
+
+(3) Plot the 97% HPDI for predicted heights.
+```{r}
+pred_y = post.fit03 %>% 
+  select(contains("y_pred"))
+
+PI = data.frame(
+  mean = pred_y %>% apply(., 2, mean),
+  L_HPDI = pred_y %>% apply(.,2,HPDI, prob = 0.97) %>% .[1,],
+  H_HPDI = pred_y %>% apply(.,2,HPDI, prob = 0.97) %>% .[2,],
+  weight = d$weight)
+  
+PI %>% 
+  ggplot() +
+  geom_point(data = d, aes(weight, height), color="blue", alpha=.3) +
+  geom_line(aes(weight, mean)) +
+  geom_ribbon(aes(x=weight,ymin=L_HPDI, ymax=H_HPDI), alpha=.3) +
+  ggtitle("97% Prediction Interval")
+```
+
+Plot CI & PI together
+```{r}
+ggplot()+
+  geom_point(data = d, aes(weight, height), color="blue", alpha=.3) +
+  geom_line(data=CI, aes(weight, mean)) +
+  geom_ribbon(data=CI, aes(x=weight, ymin=L_HPDI, ymax=H_HPDI), alpha=.5) +
+  geom_ribbon(data=PI, aes(x=weight,ymin=L_HPDI, ymax=H_HPDI), alpha=.2)
+```
+
+
