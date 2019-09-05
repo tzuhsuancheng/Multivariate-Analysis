@@ -30,7 +30,7 @@
 - Keywords: WAIC, possion distribution, log-link
 
 ## Assignment7:
-- Ch1 Mmonsters and mixtures, Ch12 Multilevel models
+- Ch1 Monsters and mixtures, Ch12 Multilevel models
 - Keywords: gamma-Poisson (aka negative-binomial), multilevel-models
 
 
