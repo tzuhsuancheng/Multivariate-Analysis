@@ -1,0 +1,903 @@
+---
+title: "Hw7"
+author: "Cheng"
+date: "6/4/2019"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE, message = FALSE, error = FALSE)
+library(tidyverse)
+library(dplyr); library(tidyr); library(rstan); library(ggplot2); library(ggthemes);library(gridExtra)
+library(rethinking)
+theme_set(theme_tufte(base_family = 'sans'))
+
+#
+library(broom)
+library(loo)
+```
+
+# Question1
+fit Poisson regression using `femininity` as a predictor
+```{r}
+# load data
+data(Hurricanes)
+df <- Hurricanes; remove(Hurricanes)
+```
+
+m1.1: Possion model of deaths using frmininity as a predictor
+```{r}
+# Setup
+m1.1 <- '
+  data {
+    int N;
+    int deaths[N];
+    real fem[N];
+  }
+
+  parameters {
+    real a;
+    real bf;
+  }
+  
+  model {
+    vector[N] lambda;
+    a   ~ normal(0,10);
+    bf  ~ normal(0,10);
+    for(i in 1:N) lambda[i] = a + bf * fem[i];
+    deaths ~ poisson_log(lambda);
+  }
+
+  generated quantities {
+    vector[N] log_lik;
+    {
+      vector[N] lambda;
+      for(i in 1:N) {
+        lambda[i] = a + bf * fem[i];
+        log_lik[i] = poisson_log_lpmf(deaths[i] | lambda[i]);
+      }
+    }
+  }
+'
+```
+
+```{r}
+# Run
+dat = list(
+  N = nrow(df),
+  deaths = df$deaths,
+  fem = df$femininity
+)
+fit1.1 = stan(model_code = m1.1, 
+              data = dat, 
+              iter = 1000, 
+              chains = 2, 
+              cores = 2)
+```
+
+m1.2: Possion model of deaths using intercept only
+```{r}
+m1.2 <- '
+  data {
+    int N;
+    int deaths[N];
+  }
+
+  parameters {
+    real a;
+  }
+  
+  model {
+    vector[N] lambda;
+    a   ~ normal(0,10);
+    for(i in 1:N) lambda[i] = a ;
+    deaths ~ poisson_log(lambda);
+  }
+
+  generated quantities {
+    vector[N] log_lik;
+    {
+      vector[N] lambda;
+      for(i in 1:N) {
+        lambda[i] = a;
+        log_lik[i] = poisson_log_lpmf(deaths[i] | lambda[i]);
+      }
+    }
+  }
+'
+```
+
+```{r}
+# Run
+dat = list(
+  N = nrow(df),
+  deaths = df$deaths
+)
+fit1.2 = stan(model_code = m1.2, 
+              data = dat, 
+              iter = 1000, 
+              chains = 2, 
+              cores = 2)
+```
+
+Output
+```{r}
+print(fit1.1, include = F, pars = 'log_lik', probs = c(.1, .5, .9))
+print(fit1.2, include = F, pars = 'log_lik', probs = c(.1, .5, .9))
+```
+
+Model Comparision using WAIC
+```{r}
+
+```
+
+```{r}
+fit_list <- list(fit1.1, fit1.2)
+ll_list <- lapply(fit_list, extract_log_lik) 
+exp_ll_list <- lapply(ll_list, exp)
+rel_n_eff_list <- lapply(exp_ll_list, relative_eff, chain_id = c(rep(1, 500), rep(2, 500)))
+# loo
+waic_list <- list()
+for(i in 1:2) {
+waic_list[[i]] <- waic(ll_list[[i]], r_eff = rel_n_eff_list[[i]], cores = 4)
+}
+names(waic_list) <- c('fit1.1', 'fit1.2')
+loo::compare(x = waic_list)
+```
+
+According to WAIC comparison model with femininity is better and take all score, but the dispersion of the difference and SE of WAIC itself is huge. The difference is less than standard error of the difference.
+
+```{r}
+post1 = as.data.frame(fit1.1)
+nd <- expand.grid(fem = seq(1, 11))
+
+# get posterior parameters of each
+f_mu_2 <- function(fem) with(post1, a + bf * fem)
+mu <- mapply(f_mu_2, fem = nd$fem)
+mu <- exp(mu)
+mu_mean <- colMeans(mu) 
+mu_hpdi <- apply(mu, 2, rethinking::PI)
+nd <- nd %>%
+  mutate(mu = mu_mean,
+  mu_hpdi_l = mu_hpdi[1,],
+  mu_hpdi_h = mu_hpdi[2,])
+```
+
+Plot m1.1:
+```{r}
+ggplot() + 
+geom_point(data = df, aes(x = df$femininity, y = df$deaths), colour = 'blue') +
+geom_ribbon(data = nd, aes(x = fem, ymin = mu_hpdi_l, ymax = mu_hpdi_h), alpha = 0.4) +
+geom_line(data = nd, aes(x = fem, y = mu)) +
+scale_color_manual(values = "black", aesthetics = "colour") +
+scale_x_continuous(breaks = seq(0, 12), limits=c(0, 12)) 
+```
+
+Intuitively there is some hidden variable that better explains deaths.Visually relation induced by the model looks suspicious for me because it looks like being caused by several outliers.
+
+
+# Question2
+Using gamma-Poisson model to predict deaths using femininity:
+```{r}
+m2.1 <- " 
+data {
+  int N;
+  int deaths[N];
+  real fem[N];
+}
+parameters {
+  real a;
+  real bf;
+  real shape;
+}
+model {
+  vector[N] mu;
+
+  a ~ normal(0,5); 
+  bf ~ normal(0,5);
+  shape ~ exponential(1);
+  
+  for(i in 1:N) mu[i] = a + bf * fem[i];
+
+  target += neg_binomial_2_log_lpmf( deaths | mu, shape); // use log link
+}
+"
+```
+
+Run
+```{r}
+dat = list(
+  N = nrow(df),
+  deaths = df$deaths,
+  fem = df$femininity
+)
+fit2.1 = stan(model_code = m2.1, 
+              data = dat, 
+              iter = 1000, 
+              chains = 2, 
+              cores = 2)
+```
+
+```{r}
+print(fit2.1)
+```
+
+Plot
+```{r}
+post2 = as.data.frame(fit2.1)
+nd <- expand.grid(fem = seq(1, 11))
+
+# get posterior parameters of each
+f_mu_2 <- function(fem) with(post2, a + bf * fem)
+mu <- mapply(f_mu_2, fem = nd$fem)
+mu <- exp(mu)
+mu_mean <- colMeans(mu) 
+mu_hpdi <- apply(mu, 2, rethinking::PI)
+nd <- nd %>%
+  mutate(mu = mu_mean,
+  mu_hpdi_l = mu_hpdi[1,],
+  mu_hpdi_h = mu_hpdi[2,])
+```
+
+```{r}
+ggplot() + 
+geom_point(data = df, aes(x = df$femininity, y = df$deaths), colour = 'blue') +
+geom_ribbon(data = nd, aes(x = fem, ymin = mu_hpdi_l, ymax = mu_hpdi_h), alpha = 0.4) +
+geom_line(data = nd, aes(x = fem, y = mu)) +
+scale_color_manual(values = "black", aesthetics = "colour") +
+scale_x_continuous(breaks = seq(0, 12), limits=c(0, 12)) 
+```
+
+why the association diminished in strength?
+I think this is because a much larger range of values of `(alpha, beta_femininity)` can produce, through the Gamma distribution, the same expectedvalues `lambda` via the variance in the Gamma process itself.
+
+# Question3
+Fit a series of models with varying interactions:
+```{r}
+# Standardize predictors
+df = df %>%
+    mutate(fem_std = as.vector(scale(femininity))) %>%
+    mutate(min_std = as.vector(scale(min_pressure))) %>%
+    mutate(dam_std = as.vector(scale(damage_norm)))
+```
+
+m3.1: No interaction: lambda ~ a + b_fem*fem_std + b_dam*dam_std + b_mp*min_std
+```{r}
+# Setup
+m3.1 <- '
+  data {
+    int N;
+    int deaths[N];
+    real fem_std[N];
+    real dam_std[N];
+    real min_std[N];
+  }
+
+  parameters {
+    real a;
+    real b_fem;
+    real b_dam;
+    real b_min;
+  }
+  
+  model {
+    vector[N] lambda;
+    a   ~ normal(0,5);
+    b_fem  ~ normal(0,1);
+    b_dam ~ normal(0,1);
+    b_min ~ normal(0,1);
+
+    for(i in 1:N) lambda[i] = a + b_fem*fem_std[i] + b_dam*dam_std[i] + b_min*min_std[i];
+    deaths ~ poisson_log(lambda);
+  }
+
+  generated quantities {
+    vector[N] log_lik;
+    {
+      vector[N] lambda;
+      for(i in 1:N) {
+        lambda[i] = a + b_fem*fem_std[i] + b_dam*dam_std[i] + b_min*min_std[i];
+        log_lik[i] = poisson_log_lpmf(deaths[i] | lambda[i]);
+      }
+    }
+  }
+'
+```
+
+```{r}
+# Run
+dat = list(
+  N = nrow(df),
+  deaths = df$deaths,
+  fem_std = df$fem_std,
+  dam_std = df$dam_std,
+  min_std = df$min_std
+)
+fit3.1 = stan(model_code = m3.1, 
+              data = dat, 
+              iter = 1000, 
+              chains = 2, 
+              cores = 2)
+```
+
+m3.2: with interaction: b_fem_dam*fem_std[i]*dam_std[i]
+```{r}
+# Setup
+m3.2 <- '
+  data {
+    int N;
+    int deaths[N];
+    real fem_std[N];
+    real dam_std[N];
+    real min_std[N];
+  }
+
+  parameters {
+    real a;
+    real b_fem;
+    real b_dam;
+    real b_min;
+    real b_fem_dam;
+  }
+  
+  model {
+    vector[N] lambda;
+    a   ~ normal(0,5);
+    b_fem  ~ normal(0,1);
+    b_dam ~ normal(0,1);
+    b_min ~ normal(0,1);
+    b_fem_dam ~ normal(0,1);
+
+    for(i in 1:N) lambda[i] = a + b_fem*fem_std[i] + b_dam*dam_std[i] + b_min*min_std[i] +
+    b_fem_dam*fem_std[i]*dam_std[i];
+    deaths ~ poisson_log(lambda);
+  }
+
+  generated quantities {
+    vector[N] log_lik;
+    {
+      vector[N] lambda;
+      for(i in 1:N) {
+        lambda[i] = a + b_fem*fem_std[i] + b_dam*dam_std[i] + b_min*min_std[i] +
+    b_fem_dam*fem_std[i]*dam_std[i];
+        log_lik[i] = poisson_log_lpmf(deaths[i] | lambda[i]);
+      }
+    }
+  }
+'
+```
+
+```{r}
+# Run
+dat = list(
+  N = nrow(df),
+  deaths = df$deaths,
+  fem_std = df$fem_std,
+  dam_std = df$dam_std,
+  min_std = df$min_std
+)
+fit3.2 = stan(model_code = m3.2, 
+              data = dat, 
+              iter = 1000, 
+              chains = 2, 
+              cores = 2)
+```
+
+m3.3: w/ interaction,  b_fem_min*fem_std[i]*min_std[i]
+```{r}
+# Setup
+m3.3 <- '
+  data {
+    int N;
+    int deaths[N];
+    real fem_std[N];
+    real dam_std[N];
+    real min_std[N];
+  }
+
+  parameters {
+    real a;
+    real b_fem;
+    real b_dam;
+    real b_min;
+    real b_fem_min;
+  }
+  
+  model {
+    vector[N] lambda;
+    a   ~ normal(0,5);
+    b_fem  ~ normal(0,1);
+    b_dam ~ normal(0,1);
+    b_min ~ normal(0,1);
+    b_fem_min ~ normal(0,1);
+
+    for(i in 1:N) lambda[i] = a + b_fem*fem_std[i] + b_dam*dam_std[i] + b_min*min_std[i] +
+    b_fem_min*fem_std[i]*min_std[i];
+    deaths ~ poisson_log(lambda);
+  }
+
+  generated quantities {
+    vector[N] log_lik;
+    {
+      vector[N] lambda;
+      for(i in 1:N) {
+        lambda[i] = a + b_fem*fem_std[i] + b_dam*dam_std[i] + b_min*min_std[i] +
+    b_fem_min*fem_std[i]*min_std[i];
+        log_lik[i] = poisson_log_lpmf(deaths[i] | lambda[i]);
+      }
+    }
+  }
+'
+```
+
+```{r}
+# Run
+dat = list(
+  N = nrow(df),
+  deaths = df$deaths,
+  fem_std = df$fem_std,
+  dam_std = df$dam_std,
+  min_std = df$min_std
+)
+fit3.3 = stan(model_code = m3.3, 
+              data = dat, 
+              iter = 1000, 
+              chains = 2, 
+              cores = 2)
+```
+
+```{r}
+
+```
+
+m3.4: no feminiity
+```{r}
+# Setup
+m3.4 <- '
+  data {
+    int N;
+    int deaths[N];
+    real dam_std[N];
+    real min_std[N];
+  }
+
+  parameters {
+    real a;
+    real b_dam;
+    real b_min;
+  }
+  
+  model {
+    vector[N] lambda;
+    a   ~ normal(0,5);
+    b_dam ~ normal(0,1);
+    b_min ~ normal(0,1);
+
+    for(i in 1:N) lambda[i] = a + b_dam*dam_std[i] + b_min*min_std[i];
+    deaths ~ poisson_log(lambda);
+  }
+
+  generated quantities {
+    vector[N] log_lik;
+    {
+      vector[N] lambda;
+      for(i in 1:N) {
+        lambda[i] = a + b_dam*dam_std[i] + b_min*min_std[i];
+        log_lik[i] = poisson_log_lpmf(deaths[i] | lambda[i]);
+      }
+    }
+  }
+'
+```
+
+```{r}
+dat = list(
+  N = nrow(df),
+  deaths = df$deaths,
+  dam_std = df$dam_std,
+  min_std = df$min_std
+)
+fit3.4 = stan(model_code = m3.4, 
+              data = dat, 
+              iter = 1000, 
+              chains = 2, 
+              cores = 2)
+```
+
+Output
+```{r}
+print(fit3.1, include = F, pars = 'log_lik', probs = c(.1, .5, .9))
+print(fit3.2, include = F, pars = 'log_lik', probs = c(.1, .5, .9))
+print(fit3.3, include = F, pars = 'log_lik', probs = c(.1, .5, .9))
+print(fit3.4, include = F, pars = 'log_lik', probs = c(.1, .5, .9))
+
+```
+
+Model comparision using WAIC
+```{r}
+fit_list <- list(fit3.1, fit3.2, fit3.3, fit3.4)
+ll_list <- lapply(fit_list, extract_log_lik) 
+exp_ll_list <- lapply(ll_list, exp)
+rel_n_eff_list <- lapply(exp_ll_list, relative_eff, chain_id = c(rep(1, 500), rep(2, 500)))
+# loo
+waic_list <- list()
+for(i in 1:4) {
+waic_list[[i]] <- waic(ll_list[[i]], r_eff = rel_n_eff_list[[i]], cores = 4)
+}
+names(waic_list) <- c('fit3.1', 'fit3.2', 'fit3.3', 'fit3.4')
+loo::compare(x = waic_list)
+```
+
+Best model according to the WAIC is m3.2 which is using damage and feminiity as interaction term.
+
+Plot
+```{r}
+post3.2 = as.data.frame(fit3.2)
+nd = expand.grid(fem_std = seq(-2,2,length.out = 10)) %>%
+  mutate(dam_std = seq(-1,5,length.out = 10)) %>%
+  mutate(min_std = seq(-2,1,length.out = 10))
+
+# get posterior parameters of each
+f_mu_2 <- function(fem_std, dam_std, min_std) with(post3.2, a + b_fem*fem_std + b_dam*dam_std + b_min*min_std + b_fem_dam*fem_std*dam_std)
+mu <- mapply(f_mu_2, fem_std = nd$fem_std, dam_std = nd$dam_std, min_std = nd$min_std)
+mu <- exp(mu)
+mu_mean <- colMeans(mu) 
+mu_hpdi <- apply(mu, 2, rethinking::PI)
+nd <- nd %>%
+  mutate(mu = mu_mean,
+  mu_hpdi_l = mu_hpdi[1,],
+  mu_hpdi_h = mu_hpdi[2,])
+```
+
+```{r}
+ggplot() + 
+geom_point(data = df, aes(x = df$fem_std, y = df$deaths), colour = 'blue') +
+geom_ribbon(data = nd, aes(x = fem_std, ymin = mu_hpdi_l, ymax = mu_hpdi_h), alpha = 0.4) +
+geom_line(data = nd, aes(x = fem_std, y = mu)) +
+scale_color_manual(values = "black", aesthetics = "colour") 
+```
+
+# Question 4
+```{r}
+df$log_dam_std <- as.vector(scale(log(df$damage_norm)))
+```
+
+m4.1: Try 
+```{r}
+# Setup
+m4.1 <- '
+  data {
+    int N;
+    int deaths[N];
+    real fem_std[N];
+    real log_dam_std[N];
+    real min_std[N];
+  }
+
+  parameters {
+    real a;
+    real b_fem;
+    real b_ldam;
+    real b_min;
+  }
+  
+  model {
+    vector[N] lambda;
+    a   ~ normal(0,5);
+    b_fem  ~ normal(0,1);
+    b_ldam ~ normal(0,1);
+    b_min ~ normal(0,1);
+
+    for(i in 1:N) lambda[i] = a + b_fem*fem_std[i] + b_ldam* log_dam_std[i] + b_min*min_std[i];
+    deaths ~ poisson_log(lambda);
+  }
+
+  generated quantities {
+    vector[N] log_lik;
+    {
+      vector[N] lambda;
+      for(i in 1:N) {
+        lambda[i] = a + b_fem*fem_std[i] + b_ldam*log_dam_std[i] + b_min*min_std[i];
+        log_lik[i] = poisson_log_lpmf(deaths[i] | lambda[i]);
+      }
+    }
+  }
+'
+```
+
+Run log(damage_norm)
+```{r}
+# Run
+dat = list(
+  N = nrow(df),
+  deaths = df$deaths,
+  fem_std = df$femininity,
+  log_dam_std = df$log_dam_std,
+  min_std = df$min_std
+)
+fit4.1 = stan(model_code = m4.1, 
+              data = dat, 
+              iter = 1000, 
+              chains = 2, 
+              cores = 2)
+```
+
+m4.2: the setting is same as 3.1 but using log(damage_norm)
+```{r}
+# Setup
+m4.2 <- '
+  data {
+    int N;
+    int deaths[N];
+    real fem_std[N];
+    real log_dam_std[N];
+  }
+
+  parameters {
+    real a;
+    real b_fem;
+    real b_ldam;
+    real b_fem_ldam;
+  }
+  
+  model {
+    vector[N] lambda;
+    a   ~ normal(0,5);
+    b_fem  ~ normal(0,1);
+    b_ldam ~ normal(0,1);
+    b_fem_ldam ~ normal(0,1);
+
+    for(i in 1:N) lambda[i] = a + b_fem*fem_std[i] + b_ldam*log_dam_std[i]  +
+    b_fem_ldam*fem_std[i]*log_dam_std[i];
+    deaths ~ poisson_log(lambda);
+  }
+
+  generated quantities {
+    vector[N] log_lik;
+    {
+      vector[N] lambda;
+      for(i in 1:N) {
+        lambda[i] = a + b_fem*fem_std[i] + b_ldam*log_dam_std[i]  +
+    b_fem_ldam*fem_std[i]*log_dam_std[i];
+        log_lik[i] = poisson_log_lpmf(deaths[i] | lambda[i]);
+      }
+    }
+  }
+'
+```
+
+```{r}
+# Run
+dat = list(
+  N = nrow(df),
+  deaths = df$deaths,
+  fem_std = df$fem_std,
+  log_dam_std = df$log_dam_std
+)
+fit4.2 = stan(model_code = m4.2, 
+              data = dat, 
+              iter = 1000, 
+              chains = 2, 
+              cores = 2)
+```
+
+Output
+```{r}
+print(fit4.1, include = F, pars = 'log_lik', probs = c(.1, .5, .9))
+print(fit4.2, include = F, pars = 'log_lik', probs = c(.1, .5, .9))
+
+```
+
+Model Comparsion musing WAIC
+```{r}
+fit_list <- list(fit4.1, fit4.2, fit3.1, fit3.2)
+ll_list <- lapply(fit_list, extract_log_lik) 
+exp_ll_list <- lapply(ll_list, exp)
+rel_n_eff_list <- lapply(exp_ll_list, relative_eff, chain_id = c(rep(1, 500), rep(2, 500)))
+# loo
+waic_list <- list()
+for(i in 1:4) {
+waic_list[[i]] <- waic(ll_list[[i]], r_eff = rel_n_eff_list[[i]], cores = 4)
+}
+names(waic_list) <- c('fit4.1', 'fit4.2', 'fit3.1', 'fit3.2')
+loo::compare(x = waic_list)
+```
+Model 4.2 performs is the best model in this case.
+
+Plot
+```{r}
+post3.2 = as.data.frame(fit3.2)
+nd = expand.grid(fem_std = seq(-2,2,length.out = 10)) %>%
+  mutate(log_dam_std = seq(-3,2,length.out = 10)) %>%
+  mutate(min_std = seq(-2,1,length.out = 10))
+
+# get posterior parameters of each
+f_mu_2 <- function(fem_std, dam_std, min_std) with(post3.2, a + b_fem*fem_std + b_dam*dam_std + b_min*min_std + b_fem_dam*fem_std*dam_std)
+mu <- mapply(f_mu_2, fem_std = nd$fem_std, dam_std = nd$log_dam_std, min_std = nd$min_std)
+mu <- exp(mu)
+mu_mean <- colMeans(mu) 
+mu_hpdi <- apply(mu, 2, rethinking::PI)
+nd <- nd %>%
+  mutate(mu = mu_mean,
+  mu_hpdi_l = mu_hpdi[1,],
+  mu_hpdi_h = mu_hpdi[2,])
+```
+
+```{r}
+df.male <- filter(df, female!=1)
+df.female <- filter(df, female==1)
+ggplot() + 
+  geom_point(data = df.male , aes(x = log_dam_std, y = deaths), color = 'blue') +
+  geom_point(data = df.female , aes(x = log_dam_std, y = deaths), color = 'red') +
+  geom_ribbon(data = nd, aes(x = log_dam_std, ymin = mu_hpdi_l, ymax = mu_hpdi_h), alpha = 0.4) +
+  geom_line(data = nd, aes(x = log_dam_std, y = mu)) +
+  scale_color_manual(values = "black", aesthetics = "colour") 
+  
+  
+```
+
+With log scale of damage there is no need for min_pressure variable.Model becomes more accurate in predictions. According to coefficients it's only interaction of femininicity and log(damage_norm) that really matters.
+
+# Question 5
+
+Load data
+```{r}
+data("bangladesh")
+d <- bangladesh
+```
+
+Data pre-processing
+```{r}
+d$district_id <- as.integer(as.factor(d$district))
+d$use_contraception <- d$use.contraception
+d$age_centered <- d$age.centered
+d$living_children <- d$living.children
+d <- select(d,-use.contraception, -age.centered, -district, -living.children)
+```
+
+m5.1: fixed effect model using dummy variables for district
+```{r}
+m5.1='
+  data {
+    int N;
+    int K;  // number of clusters
+    int dis_id[N];
+    int use_con[N];
+  }
+  parameters {
+    vector[K] a_dis;
+  }
+  model {
+    vector[N] p;
+    target += normal_lpdf(a_dis | 0, 5);
+
+    for (i in 1:N) p[i] = inv_logit( a_dis[dis_id[i]]);   
+    target += binomial_lpmf(use_con | 1, p);
+  }
+  generated quantities {
+    vector[N] log_lik;
+    {
+    vector[N] p;
+    for(i in 1:N) {
+      p[i] = inv_logit( a_dis[dis_id[i]] );
+      log_lik[i] = binomial_lpmf(use_con[i] | 1, p[i]);
+    }
+    }
+  }'
+```
+
+Run the model
+```{r}
+dat <- list(
+  N = nrow(d),
+  use_con = d$use_contraception,
+  K = max(d$district_id),
+  dis_id = d$district_id
+)
+fit5.1 <- stan(model_code = m5.1, data = dat, iter = 1000, chains = 2, cores = 2)
+```
+
+m5.2: multilevel model with varing intercepts for district
+```{r}
+m5.2='
+  data {
+    int N;
+    int K;  // number of clusters
+    int dis_id[N];
+    int use_con[N];
+  }
+  parameters {
+    vector[K] a_dis;
+    real alpha;
+    real <lower=0> sigma;
+  }
+  model {
+    vector[N] p;
+    target += normal_lpdf(alpha | 0, 1);
+    target += cauchy_lpdf(sigma | 0, 1);
+    target += normal_lpdf(a_dis | alpha, sigma);
+
+    for (i in 1:N) p[i] = inv_logit( a_dis[dis_id[i]]);   
+    target += binomial_lpmf(use_con | 1, p);
+  }
+  generated quantities {
+    vector[N] log_lik;
+    {
+    vector[N] p;
+    for(i in 1:N) {
+      p[i] = inv_logit( a_dis[dis_id[i]] );
+      log_lik[i] = binomial_lpmf(use_con[i] | 1, p[i]);
+    }
+    }
+  }'
+```
+
+```{r}
+dat <- list(
+  N = nrow(d),
+  use_con = d$use_contraception,
+  K = max(d$district_id),
+  dis_id = d$district_id
+)
+fit5.2 <- stan(model_code = m5.2, data = dat, iter = 1000, chains = 2, cores = 2)
+```
+
+Output
+```{r}
+print(fit5.1, include = F, pars = 'log_lik', probs = c(.1, .5, .9))
+print(fit5.2, include = F, pars = 'log_lik', probs = c(.1, .5, .9))
+```
+
+Model Comparision using WAIC
+```{r}
+library(loo)
+ll12_1 <- extract_log_lik(fit5.1)
+ll12_2 <- extract_log_lik(fit5.2)
+reff1 <- relative_eff(ll12_1, chain_id = c(rep(1, 500), rep(2, 500)), cores =2)
+reff2 <- relative_eff(ll12_2, chain_id = c(rep(1, 500), rep(2, 500)), cores =2)
+waic5.1 <- waic(ll12_1, r_eff = reff1, cores = 2)
+waic5.2 <- waic(ll12_2, r_eff = reff2, cores = 2)
+loo::compare(waic5.1, waic5.2)
+c(waic5.1$waic,waic5.2$waic)
+```
+
+Multilevel model performs better.
+
+Plot
+```{r}
+d.res <- d %>% 
+  group_by(district_id) %>% 
+  summarise(
+    cnt=n(), 
+    ttl_use_c=sum(use_contraception),
+    rate=ttl_use_c/cnt
+  ) %>% 
+  as.data.frame() %>%
+  mutate(
+    d_label = reorder(as.factor(paste0(district_id,'/n=',cnt)), cnt)
+  ) %>% 
+  arrange(district_id)
+```
+
+
+```{r}
+post5.2 <- as.data.frame(fit5.2, pars = c('alpha', 'sigma', 'a_dis'))
+post5.1 <- as.data.frame(fit5.1, pars = c('a_dis'))
+d.res$pred5.1 <- post5.1 %>% colMeans %>% plogis
+d.res$pred5.2 <- post5.2[,-c(1:2)] %>% colMeans %>% plogis
+
+ggplot(d.res) + 
+  geom_vline(xintercept = c(20, 40)) +
+  geom_hline(yintercept = plogis(mean(post5.2$alpha)), linetype = 'dashed') +
+  geom_point(aes(x = district_id, y = rate), colour = 'dodgerblue') +
+  geom_point(aes(x = district_id, y = pred5.1), shape = 21, colour = 'green') +
+  geom_point(aes(x = district_id, y = pred5.2), shape = 21, colour = 'red') +
+  scale_x_continuous(limits = c(0, 60), breaks = c(1, 20, 40, 60)) +
+  labs(x = 'district_id', y = 'rate') 
+```
+
+blue: actual data
+green: pooled model
+red: fixed model
+

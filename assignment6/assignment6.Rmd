@@ -1,0 +1,284 @@
+---
+title: "HW6"
+author: "Cheng"
+date: "5/21/2019"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE, message = FALSE, error = FALSE)
+library(tidyverse)
+library(dplyr); library(tidyr); library(rstan); library(ggplot2); library(ggthemes);library(gridExtra)
+library(rethinking)
+theme_set(theme_tufte(base_family = 'sans'))
+
+#
+library(broom)
+library(loo)
+```
+
+## Question1
+
+```{r}
+data("salamanders")
+d <- salamanders; remove(salamanders)
+```
+
+Try the model:
+```{r}
+# Rstan setup
+m1='
+  data {
+    int N;
+    int T[N];
+    int C[N];
+  }
+  parameters {
+    real a;
+    real bc;
+  }
+  model {
+    vector[N] lambda;
+    a   ~ normal(0,100);
+    bc  ~ normal(0,1);
+    for(i in 1:N) lambda[i] = a + bc * C[i];
+    T ~ poisson_log(lambda);
+  }
+  generated quantities {
+    vector[N] log_lik;
+    {
+      vector[N] lambda;
+      for(i in 1:N) {
+        lambda[i] = a + bc * C[i];
+        log_lik[i] = poisson_log_lpmf(T[i] | lambda[i]);
+      }
+    }
+  }
+  '
+```
+
+Output1
+```{r}
+dat = list(N = NROW(d), 
+            T = d$SALAMAN,
+            C = d$PCTCOVER)
+
+fit1 <- stan(model_code = m1, 
+                  data = dat, 
+                  iter = 1000, 
+                  chains = 2, 
+                  cores = 2)
+
+print(fit1)
+```
+
+```{r}
+library(GGally) 
+post1 <- as.data.frame(fit1)
+post1[,1:2] %>%
+  ggpairs() + theme_tufte(base_family = 'sans')
+```
+
+As you can see, there is the strong correlation between intercept and the coefficient of PCTCOVER. So I would like to try the method of de-mean, centering predictors to see whether it would reduce the correlation among parameters. Let's try the model 2 with de-mean method:
+
+```{r}
+# add de-mean predictors
+d$PCTCOVER_de <- as.integer(d$PCTCOVER - mean(d$PCTCOVER))
+str(d)
+```
+
+```{r}
+dat = list(N = NROW(d), 
+            T = d$SALAMAN,
+            C = d$PCTCOVER_de)
+
+fit2 <- stan(model_code = m1, 
+                  data = dat, 
+                  iter = 1000, 
+                  chains = 2, 
+                  cores = 2)
+
+post2 <- as.data.frame(fit2)
+```
+
+Output2:
+```{r}
+post1 <- as.data.frame(fit2)
+post1[,1:2] %>%
+  ggpairs() + theme_tufte(base_family = 'sans')
+```
+
+The correlation has slightly decreased, but it's still strong. But I would use model2 to evalute the model of relationship between density and percent cover.
+
+```{r}
+nd <- 
+  expand.grid(pctcover = seq(0, 100, length.out = 10)) %>%
+  mutate(pctcover_de = pctcover - mean(d$PCTCOVER))
+# get posterior parameters of each
+f_mu_2 <- function(C) with(post2, a + bc * C)
+mu <- mapply(f_mu_2, C = nd$pctcover_de)
+mu <- exp(mu)
+mu_mean <- colMeans(mu) 
+mu_hpdi <- apply(mu, 2, rethinking::HPDI)
+nd <- nd %>%
+  mutate(mu = mu_mean,
+  mu_hpdi_l = mu_hpdi[1,],
+  mu_hpdi_h = mu_hpdi[2,])
+```
+plot:
+```{r}
+ggplot() + 
+geom_point(data = d, aes(x = PCTCOVER, y = SALAMAN)) +
+geom_ribbon(data = nd, aes(x = pctcover, ymin = mu_hpdi_l, ymax = mu_hpdi_h), alpha = 0.1) +
+geom_line(data = nd, aes(x = pctcover, y = mu)) +
+scale_color_manual(values = "black", aesthetics = "colour") +
+scale_x_continuous(breaks = seq(0, 100, by = 20)) + 
+scale_y_continuous(breaks = seq(0, 12, by = 1))
+```
+
+When the percent of cover ground is below 20, there are only few salamanders. When the covered ground is more than 80%, the salamander count rises obviously as you can see from the plot. This show that our model do capture the pattern of observations. However, when the covered ground is more than 80%, our model underestimate the result comparing to the true value. This indicates the model can be improved.
+
+## Question2
+To improve the model by adding variable FORESTAGE, Let's take a look of it first:
+```{r}
+# take a look
+hist(d$FORESTAGE, breaks = 10,
+     main="Histogram of Forest age", xlab="Forest age")
+```
+
+The distribution of FORESTAGE is quite skewed! So I would like to do the log transformation.
+```{r}
+# take log
+d$logFORESTAGE <- as.integer(log(d$FORESTAGE + 1))
+d$logFORESTAGE_de <- as.integer(d$logFORESTAGE - mean(d$logFORESTAGE)) # centered
+hist(d$logFORESTAGE_de, breaks = 10,
+     main="Histogram of Forest age", xlab="Forest age")
+print(str(d))
+```
+
+```{r}
+# Rstan Setup
+m3='
+  data {
+    int N;
+    int T[N];
+    int C[N];
+    int F[N];
+  }
+  parameters {
+    real a;
+    real bc;
+    real bf;
+  }
+  model {
+    vector[N] lambda;
+    a   ~ normal(0,100);
+    bc  ~ normal(0,1);
+    bf  ~ normal(0,1);
+    for(i in 1:N) lambda[i] = a + bc * C[i] + bf * F[i];
+    T ~ poisson_log(lambda);
+  }
+  generated quantities {
+    vector[N] log_lik;
+    {
+      vector[N] lambda;
+      for(i in 1:N) {
+        lambda[i] = a + bc * C[i] + bf * F[i];
+        log_lik[i] = poisson_log_lpmf(T[i] | lambda[i]);
+      }
+    }
+  }
+  '
+```
+
+Run 
+```{r}
+dat = list(N = NROW(d), 
+            T = d$SALAMAN,
+            C = d$PCTCOVER_de,
+            F = d$logFORESTAGE_de)
+
+fit3 <- stan(model_code = m3, 
+                  data = dat, 
+                  iter = 1000, 
+                  chains = 2, 
+                  cores = 2)
+```
+
+Parameters
+```{r}
+print(fit3)
+post3 <- as.data.frame(fit3)
+post3[,1:3] %>%
+  ggpairs() + theme_tufte(base_family = 'sans')
+```
+
+FOESTAGE has a small negative coefficient but with a large standard deviation. Besides, there is a strong correlation between FORESTAGE and PERCOVER which may imply that adding only FORESTAGE doesn't improve the model obviously.
+
+Run model 4, which only use FORESTAGE as predictor for comparing.
+```{r}
+m4='
+  data {
+    int N;
+    int T[N];
+    int F[N];
+  }
+  parameters {
+    real a;
+    real bf;
+  }
+  model {
+    vector[N] lambda;
+    a   ~ normal(0,100);
+    bf  ~ normal(0,1);
+    for(i in 1:N) lambda[i] = a + bf * F[i];
+    T ~ poisson_log(lambda);
+  }
+  generated quantities {
+    vector[N] log_lik;
+    {
+      vector[N] lambda;
+      for(i in 1:N) {
+        lambda[i] = a + bf * F[i];
+        log_lik[i] = poisson_log_lpmf(T[i] | lambda[i]);
+      }
+    }
+  }
+  '
+```
+
+Run
+```{r}
+dat = list(N = NROW(d), 
+            T = d$SALAMAN,
+            F = d$logFORESTAGE_de)
+
+fit4 <- stan(model_code = m4, 
+                  data = dat, 
+                  iter = 1000, 
+                  chains = 2, 
+                  cores = 2)
+```
+
+
+Next, I'm gonna compare the models using WAIC:
+```{r}
+library(loo)
+fit_list <- list(fit2, fit3, fit4)
+# extract log likelihoods(Apply a Function over a List)
+ll_list <- lapply(fit_list, extract_log_lik) 
+# exponentiate
+exp_ll_list <- lapply(ll_list, exp)
+# get relative neff
+rel_n_eff_list <- lapply(exp_ll_list, relative_eff, chain_id = c(rep(1, 500), rep(2, 500)))
+# loo
+waic_list <- list()
+for(i in 1:3) {
+waic_list[[i]] <- waic(ll_list[[i]], r_eff = rel_n_eff_list[[i]], cores = 4)
+}
+names(waic_list) <- c('fit2', 'fit3', 'fit4')
+loo::compare(x = waic_list)
+```
+
+The first model still performs best, whereas the model using only forest age performs much worse than the other two models. And we can see that adding FORESTAGE to the model doesn't make the model perform more better.
