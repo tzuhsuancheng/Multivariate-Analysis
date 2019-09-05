@@ -1,5 +1,7 @@
 # Multivariate-Analysis
-- Semester: NTU-10702 Multivariate Analysis (多變量分析)
+Data anlaysis using Bayesian statistics and R
+
+- Semester: NTU-10702 Multivariate Analysis: Model Based-Statistics (多變量分析)
 - Textbook: McElreath, R. 2016. Statistical Rethinking.
 - Tutorial: [NTU Multivariate Analysis Tutorial](https://www.youtube.com/watch?v=MrizcrawN3c&list=PL-QkhjfYf9S2ryHzWj6uHisRYHsHjt1sm)
 
