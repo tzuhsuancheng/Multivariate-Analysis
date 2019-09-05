@@ -5,6 +5,19 @@ Data anlaysis using Bayesian statistics and R
 - Textbook: McElreath, R. 2016. Statistical Rethinking.
 - Tutorial: [NTU Multivariate Analysis Tutorial](https://www.youtube.com/watch?v=MrizcrawN3c&list=PL-QkhjfYf9S2ryHzWj6uHisRYHsHjt1sm)
 
+## Final Project: 
+Assumed that we are going to cooperate with Taipei government. Now, we are in charge of the most important YouBike project, and we are given Taipei YouBike renting data of January 2016. In this project, we are going to explore these data to find out business insight regarding either bike-dispatching plan, pricing strategy, or any other operating suggestions.
+- [Presentation](https://github.com/tzuhsuancheng/Multivariate-Analysis/blob/master/Final_project/QBS_Slide_Group4.pdf)
+- [Video](https://youtu.be/6rECr7H1a2Y)
+- [Code](https://drive.google.com/open?id=1ZSkYs3Pps6FIg8aXAmeuCoYEX-2BJz8w)
+
+## Final Exam: Predicting the success rate of calls
+The data provided is related with direct marketing campaigns (phone calls) of a local retail
+bank. The goal is to build up your models, using R and Stan together with the exam questions,
+to predict the success rate of calls.
+- [Code](https://github.com/tzuhsuancheng/Multivariate-Analysis/blob/master/Final_Exam/final_r07741023.Rmd)
+
+
 ## Assignment1:
 - Ch3 Sampling the imaginary
 - Keywords: grid approximation
