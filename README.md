@@ -9,34 +9,28 @@
 - [Code](https://github.com/tzuhsuancheng/Multivariate-Analysis/blob/master/assignment1/assignment1.Rmd)
 
 ## Assignment2:
-- Ch4_linear_models
-- Keywords: plot HPDI, PI, prediction
-- [Code]()
+- Ch4 linear models
+- Keywords: plots, confidence Interval, prediction interval, regression
+- [Code](https://github.com/tzuhsuancheng/Multivariate-Analysis/blob/master/assignment2/assignment2.Rmd)
 
 ## Assignment3:
-- exercise: ch5_multivariate_linear_models
-- tutorial: ch5 
-- key points: counterfactual plot
+- Ch5 Multivariate linear models
+- Keywords: counterfactual plots
 
 ## Assignment4:
-- exercise: ch7_interactions
-- tutorial: ch6-7
-- key points: plot prediction of interactive model with dummy variables, model-averaged predictions, WAIC
-- r functions: cut()
+- Ch7 Interactions
+- Keywords: plot prediction of interactive model with dummy variables, model-averaged predictions, WAIC
 
 ## Assignment5:
-- exercise: ch10_counting and classification
-- tutorial: ch10
-- key points: WAIC, plot the posterior predictions: proportion vs counts, logit-link
-- r function: pmap()
+- Ch10 Counting and classification
+- Keywords: WAIC, plot the posterior predictions: proportion vs counts, logit-link
 
 ## Assignment6:
-- exercise: ch10_counting and classification
-- key points: WAIC, possion distribution, log-link
+- Ch10_counting and classification
+- Keywords: WAIC, possion distribution, log-link
 
 ## Assignment7:
-- exercise: ch11_monsters_and_mixtures, ch12_multilevel_models
-- tutorial: ch11, ch12
-- key points: gamma-Poisson (aka negative-binomial), multilevel-models
+- Ch1 Mmonsters and mixtures, Ch12 Multilevel models
+- Keywords: gamma-Poisson (aka negative-binomial), multilevel-models
 
 
