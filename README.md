@@ -36,4 +36,5 @@
 ## Memo
 - covert .Rmd to .R:
     `library(knitr)`
+    
     `purl("text.Rmd")`
