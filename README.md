@@ -33,4 +33,7 @@
 - Ch1 Monsters and mixtures, Ch12 Multilevel models
 - Keywords: gamma-Poisson (aka negative-binomial), multilevel-models
 
-
+## Memo
+- covert .Rmd to .R:
+    `library(knitr)`
+    `purl("text.Rmd")`
