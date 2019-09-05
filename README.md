@@ -26,7 +26,7 @@
 - Keywords: WAIC, plot the posterior predictions: proportion vs counts, logit-link
 
 ## Assignment6:
-- Ch10_counting and classification
+- Ch10 Counting and classification
 - Keywords: WAIC, possion distribution, log-link
 
 ## Assignment7:
