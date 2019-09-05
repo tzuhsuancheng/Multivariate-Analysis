@@ -1,0 +1,263 @@
+---
+title: "Final"
+author: "Cheng"
+date: "6/20/2019"
+output: word_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE, message = FALSE, error = FALSE)
+library(tidyverse)
+library(dplyr); library(tidyr); library(rstan); library(ggplot2); library(ggthemes);library(gridExtra)
+library(rethinking)
+theme_set(theme_tufte(base_family = 'sans'))
+
+#
+library(broom)
+library(loo)
+library(fastDummies)
+```
+
+
+```{r}
+d = read.csv("final 1.csv", header = TRUE, sep = ",") 
+# take a look of data
+summary(d)
+```
+
+data preprocessing
+```{r}
+d$y2 = as.integer(d$y) 
+# categorical:
+d[, c("job", "marital", "education", "default", "housing", "loan", "contact", "month", "day_of_week", "poutcome")] =
+   lapply(d[, c("job", "marital", "education", "default", "housing", "loan", "contact", "month", "day_of_week", "poutcome")], factor)
+
+#standardize numreical variables: ("age", "duration", "campaign", "pdays", "previous", "emp.var.rate", "cons.price.idx", "cons.conf.idx", "taiwan3m", "nr.employed")
+d = d %>%
+    mutate(age_std = as.vector(scale(age))) %>%
+    mutate(duration_std = as.vector(scale(duration))) %>%
+    mutate(pdays_std = as.vector(scale(pdays))) %>%
+    mutate(previous_std = as.vector(scale(previous))) %>%
+    mutate(emp.var.raten_std = as.vector(scale(emp.var.rate))) %>%
+    mutate(cons.price.idx_std = as.vector(scale(cons.price.idx))) %>%
+    mutate(cons.conf.idx_std = as.vector(scale(cons.conf.idx))) %>%
+    mutate(tw3m_std = as.vector(scale(tw3m))) %>%
+    mutate(nr.employed_std = as.vector(scale(nr.employed)))
+```
+
+create dummy
+```{r}
+d2 = fastDummies::dummy_cols(d) # with dummy
+head(d2)
+```
+
+
+drop outcome and duration according to the notation
+```{r}
+x_train = dplyr::select(d2,-c(y, y2, duration, y_no, y_yes)) 
+y_train = dplyr::select(d2, y2)
+```
+
+(Note that since this dataset would be high-dimensionl after dummy and there are 40988 observations which is a large dataset for my laptop's capicty, so I would like to just run numerical and few categorical variables in this case.. though it may lose some information... )
+```{r}
+x_train2 = sample_n(x_train, 1000)
+y_train2 = sample_n(y_train, 1000)
+```
+
+
+# 1) Part 1 (20%). 
+
+create a single-level model using logistic regression
+select only numerical data
+```{r}
+x_train0 = dplyr::select(x_train2, c( "age", "campaign")) 
+y_train0 = y_train2
+```
+
+```{r}
+m.single <- "
+  data {
+    int K; 
+    int N; 
+    int N2;
+    int D; 
+    int y[N]; 
+    vector[D] x[N]; 
+    vector[D] x_test[N2]; 
+    }
+    
+  parameters {
+    matrix[K, D] beta; 
+  }
+  
+  model {
+
+  // prior for beta 
+    for (c in 1:K)
+    beta[c] ~ normal(0,5);
+    
+    // likelihood of outcome
+    for (i in 1:N)
+    y[i] ~ categorical_logit(beta * x[i]); //softmax
+    
+  }
+  generated quantities{
+    vector[N] log_lik;
+    vector[N2] output;
+    
+    for(i in 1:N2){
+     log_lik[i] = categorical_logit_lpmf(y[i] | beta * x[i]);
+     output[i] = categorical_logit_rng(beta * x_test[i]);
+    }
+  }
+  "
+
+mod0 <- stan_model(model_code = m.single)
+```
+
+```{r}
+dat <- list(
+  N = nrow(x_train0),
+  K = 2,
+  D = ncol(x_train0),
+  y = y_train0$y2,
+  x = x_train0,
+  N2 = nrow(x_train0),
+  x_test = x_train0 # for backtesting
+)
+
+fit0 = vb(mod0, data = dat, iter = 20000)
+```
+
+```{r}
+post0 <- as.data.frame(fit0)
+```
+
+#2) Part 2 (20%). 
+Build up an advanced statistical model (option: monster, mixture, ormultilevel), with the following data set: final 1.csv
+
+put all the variables including numerical and all dummy variables
+```{r}
+m.logit <- "
+  data {
+    int K; 
+    int N; 
+    int N2;
+    int D; 
+    int y[N]; 
+    vector[D] x[N]; 
+    vector[D] x_test[N2]; 
+    }
+    
+  parameters {
+    matrix[K, D] beta; 
+  }
+  
+  model {
+
+  // prior for beta 
+    for (c in 1:K)
+    beta[c] ~ normal(0,5);
+    
+    // likelihood of outcome
+    for (i in 1:N)
+    y[i] ~ categorical_logit(beta * x[i]); //softmax
+    
+  }
+  generated quantities{
+    vector[N] log_lik;
+    vector[N2] output;
+    
+    for(i in 1:N2){
+     log_lik[i] = categorical_logit_lpmf(y[i] | beta * x[i]);
+     output[i] = categorical_logit_rng(beta * x_test[i]);
+    }
+  }
+  "
+
+mod <- stan_model(model_code = m.logit)
+```
+
+
+```{r}
+dat <- list(
+  N = nrow(x_train2),
+  K = 2,
+  D = ncol(x_train2),
+  y = y_train2$y2,
+  x = x_train2,
+  N2 = nrow(x_train2),
+  x_test = x_train2 # for backtesting
+)
+
+fit1 = vb(mod, data = dat, iter = 10000)
+```
+
+```{r}
+post1 <- as.data.frame(fit1)
+```
+
+
+#3) Part 3 (20%). 
+Model comparison: calculate WAIC of the two models developed.
+```{r}
+log_lik_1.1 = extract_log_lik(fit0, merge_chains = FALSE)
+log_lik_1.2 = extract_log_lik(fit1, merge_chains = FALSE)
+(waic_1.1 = waic(log_lik_1.1))
+(waic_1.2 = waic(log_lik_1.2))
+mod_comp <- loo::compare(waic_1.1, waic_1.2)
+mod_comp
+```
+
+#4) Part 4 (20%). 
+Make an ensemble model by combining the two models developed.
+
+
+#5) Part 5 (20%). 
+After answering the questions above, check the estimation accuracy
+using the following data set: final 2.csv. Specifically, use the three models developed
+to examine whether they make acceptable prediction performance via calculating the
+correct rate of these three models, respectively.
+
+```{r}
+d_test = read.csv("final 2.csv", header = TRUE, sep = ",") 
+d_test$y2 = as.integer(d_test$y) 
+
+```
+
+```{r}
+x_test = dplyr::select(d_test, c( "age", "campaign")) 
+y_test = d_test$y2
+```
+
+```{r}
+dat <- list(
+  N = nrow(x_train0),
+  K = 2,
+  D = ncol(x_train0),
+  y = y_train0$y2,
+  x = x_train0,
+  N2 = nrow(x_test),
+  x_test = x_test # for backtesting
+)
+
+fit3 = vb(mod0, data = dat, iter = 20000)
+```
+
+```{r}
+post3 <- as.data.frame(fit3)
+
+ypred <-
+  post3 %>% 
+    dplyr::select(contains("output")) %>%
+    apply(., 2, as.integer) %>%
+    apply(., 2, DescTools::Mode)
+```
+
+```{r}
+library(MLmetrics)
+Accuracy(ypred, y_test)
+```
+
