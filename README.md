@@ -3,7 +3,6 @@ Data anlaysis using Bayesian statistics and R
 
 - Semester: NTU-10702 Multivariate Analysis: Model Based-Statistics (多變量分析)
 - Textbook: McElreath, R. 2016. Statistical Rethinking.
-- Tutorial: [NTU Multivariate Analysis Tutorial](https://www.youtube.com/watch?v=MrizcrawN3c&list=PL-QkhjfYf9S2ryHzWj6uHisRYHsHjt1sm)
 
 ## Final Project: 
 Assumed that we are going to cooperate with Taipei government. Now, we are in charge of the most important YouBike project, and we are given Taipei YouBike renting data of January 2016. In this project, we are going to explore these data to find out business insight regarding either bike-dispatching plan, pricing strategy, or any other operating suggestions.
